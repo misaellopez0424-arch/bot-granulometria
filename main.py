@@ -11,22 +11,24 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
-app = FastAPI(title="API de Granulometría Geotécnica")
+app = FastAPI(title="API de Granulometría Metalúrgica y Geotécnica")
 
-# 1. Modelos de entrada de datos (JSON)
+# 1. Modelos de entrada de datos actualizados (JSON)
 class DatosMalla(BaseModel):
     sieve: str
     retained_weight_g: float
 
 class PeticionAnalisis(BaseModel):
+    report_title: Optional[str] = "LABORATORIO METALURGICO" # Título dinámico con valor por defecto
+    sample_name: Optional[str] = "Muestra No Identificada"    # Nombre de muestra corregido por IA
     total_initial_weight: Optional[float] = None
     data: List[DatosMalla]
 
-# Mapeo estándar de aberturas de tamices según normas ASTM / AASHTO
+# Mapeo estándar de aberturas de tamices según normas internacionales
 ABERTURAS_MALLAS = {
     '3"': 75.0, '2"': 50.0, '1 1/2"': 37.5, '1"': 25.0, '3/4"': 19.0, '1/2"': 12.5, '3/8"': 9.5,
     'No. 4': 4.75, 'No. 8': 2.36, 'No. 10': 2.00, 'No. 16': 1.18, 'No. 30': 0.60, 'No. 40': 0.425,
-    'No. 50': 0.30, 'No. 100': 0.15, 'No. 200': 0.075, 'Pan': 0.001  # El fondo usa un valor mínimo para la escala logarítmica
+    'No. 50': 0.30, 'No. 100': 0.15, 'No. 200': 0.075, 'Pan': 0.001
 }
 
 @app.post("/api/v1/granulometria")
@@ -45,27 +47,26 @@ async def generar_reporte_granulometrico(payload: PeticionAnalisis):
         df = pd.DataFrame(registros)
         suma_retenido = df["Retenido_g"].sum()
         
-        # 3. Cálculos de Ingeniería Civil
+        # 3. Cálculos Metalúrgicos / Geotécnicos
         df["Pct_Retenido"] = (df["Retenido_g"] / suma_retenido) * 100
         df["Cum_Retenido_g"] = df["Retenido_g"].cumsum()
         df["Cum_Pct_Retenido"] = df["Pct_Retenido"].cumsum()
         df["Pct_Pasante"] = 100 - df["Cum_Pct_Retenido"]
         
-        # Control de calidad: Cálculo del Error de Masa
         error_masa = 0.0
         if payload.total_initial_weight and payload.total_initial_weight > 0:
             error_masa = ((suma_retenido - payload.total_initial_weight) / payload.total_initial_weight) * 100
 
         # 4. Generar la Gráfica Semilogarítmica en Memoria RAM
-        df_grafica = df[df["Malla"] != "Pan"] # Excluimos el fondo para que la curva no caiga a cero abruptamente
-        plt.figure(figsize=(7, 3.5))
+        df_grafica = df[df["Malla"] != "Pan"]
+        plt.figure(figsize=(7, 3.2))
         plt.plot(df_grafica["Abertura_mm"], df_grafica["Pct_Pasante"], marker='o', color='#1a5f7a', linewidth=2)
         plt.xscale('log')
-        plt.xlim(100, 0.01) # Inversión del eje X: mallas gruesas a la izquierda, finas a la derecha
+        plt.xlim(100, 0.01)
         plt.ylim(0, 105)
-        plt.title('Curva de Distribución Granulométrica', fontsize=12, fontweight='bold')
-        plt.xlabel('Abertura del Tamiz (mm) - Escala Logarítmica', fontsize=9)
-        plt.ylabel('Porcentaje Pasante (%)', fontsize=9)
+        plt.title('Curva de Distribución Granulométrica', fontsize=11, fontweight='bold')
+        plt.xlabel('Abertura del Tamiz (mm) - Escala Logarítmica', fontsize=8)
+        plt.ylabel('Porcentaje Pasante (%)', fontsize=8)
         plt.grid(True, which="both", ls="--", color='#cccccc')
         
         buf_imagen = io.BytesIO()
@@ -73,23 +74,28 @@ async def generar_reporte_granulometrico(payload: PeticionAnalisis):
         buf_imagen.seek(0)
         plt.close()
 
-        # 5. Diseñar la estructura del PDF Dinámico
+        # 5. Diseñar la estructura del PDF con los nuevos campos
         buf_pdf = io.BytesIO()
         doc = SimpleDocTemplate(buf_pdf, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
         story = []
         estilos = getSampleStyleSheet()
         
-        # Estilos visuales personalizados
-        estilo_titulo = ParagraphStyle('DocTitle', parent=estilos['Heading1'], fontSize=18, textColor=colors.HexColor('#1a5f7a'), spaceAfter=6)
-        estilo_meta = ParagraphStyle('MetaText', parent=estilos['Normal'], fontSize=10, textColor=colors.HexColor('#333333'), spaceAfter=12)
+        # Estilos visuales personalizados (Color corporativo azul metalúrgico)
+        estilo_titulo = ParagraphStyle('DocTitle', parent=estilos['Heading1'], fontSize=20, textColor=colors.HexColor('#1a5f7a'), spaceAfter=4, alignment=1)
+        estilo_sub = ParagraphStyle('DocSub', parent=estilos['Heading2'], fontSize=12, textColor=colors.HexColor('#2c3e50'), spaceAfter=10, alignment=1)
+        estilo_meta = ParagraphStyle('MetaText', parent=estilos['Normal'], fontSize=10, textColor=colors.HexColor('#333333'), spaceAfter=6)
 
-        # Encabezado del Reporte
-        story.append(Paragraph("INFORME DE LABORATORIO GEOTÉCNICO", estilo_titulo))
-        story.append(Paragraph(f"<b>Peso Inicial de la Muestra:</b> {payload.total_initial_weight or 'N/A'} g | <b>Peso Total Lavado/Retenido:</b> {suma_retenido:.2f} g", estilo_meta))
+        # Encabezado Dinámico del Reporte usando los nuevos campos
+        story.append(Paragraph(payload.report_title.upper(), estilo_titulo))
+        story.append(Paragraph("INFORME DE ENSAYO GRANULOMÉTRICO", estilo_sub))
+        story.append(Spacer(1, 5))
         
-        # Alerta visual si el error supera el límite de la norma (típicamente +-1%)
+        # Mostrar el nombre canónico corregido por la IA
+        story.append(Paragraph(f"<b>Identificación de la Muestra:</b> {payload.sample_name}", estilo_meta))
+        story.append(Paragraph(f"<b>Peso Inicial Seco:</b> {payload.total_initial_weight or 'N/A'} g | <b>Peso Total Retenido:</b> {suma_retenido:.2f} g", estilo_meta))
+        
         color_estado = "#27ae60" if abs(error_masa) <= 1.0 else "#c0392b"
-        story.append(Paragraph(f"<b>Error de Masa Calculado:</b> <font color='{color_estado}'>{error_masa:.2f}%</font> (Límite tolerable: ±1%)", estilo_meta))
+        story.append(Paragraph(f"<b>Error de Masa Dinámico:</b> <font color='{color_estado}'>{error_masa:.2f}%</font> (Límite tolerable: ±1%)", estilo_meta))
         story.append(Spacer(1, 10))
 
         # Estructuración de la Tabla de Datos
@@ -104,7 +110,7 @@ async def generar_reporte_granulometrico(payload: PeticionAnalisis):
                 f"{row['Pct_Pasante']:.1f}%"
             ])
             
-        tabla_pdf = Table(datos_tabla, colWidths=[80, 80, 80, 80, 100, 80])
+        tabla_pdf = Table(datos_tabla, colWidths=[70, 85, 80, 80, 100, 80])
         tabla_pdf.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1a5f7a')),
             ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
@@ -117,12 +123,11 @@ async def generar_reporte_granulometrico(payload: PeticionAnalisis):
             ('FONTSIZE', (0,1), (-1,-1), 9),
         ]))
         story.append(tabla_pdf)
-        story.append(Spacer(1, 15))
+        story.append(Spacer(1, 10))
 
         # Inserción de la curva gráfica dentro del PDF
-        story.append(Image(buf_imagen, width=450, height=225))
+        story.append(Image(buf_imagen, width=440, height=200))
         
-        # Renderizar documento y preparar el flujo de salida
         doc.build(story)
         buf_pdf.seek(0)
         
