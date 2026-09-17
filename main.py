@@ -1,11 +1,4 @@
-from pathlib import Path
-import re
-
-src = Path("/mnt/data/main.py").read_text(encoding="utf-8")
-
-# We'll produce a complete replacement based on the uploaded main.py,
-# preserving its PDF/report functionality while adding JSON results and P80.
-code = r'''import io
+import io
 import math
 import matplotlib.pyplot as plt
 import numpy as np
@@ -1004,11 +997,3 @@ async def generar_pdf_granulometrico(payload: PeticionAnalisis):
             status_code=500,
             detail=str(e)
         )
-'''
-
-# Add missing import re if not present (it is present in generated code).
-out = Path("/mnt/data/main_corregido.py")
-out.write_text(code, encoding="utf-8")
-
-print(f"Archivo creado: {out}")
-print(f"Líneas: {len(code.splitlines())}")
